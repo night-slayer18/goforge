@@ -1,0 +1,10 @@
+# Application configuration
+server:
+  port: 8080
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "password"
+  dbname: "{{.ProjectName}}"
