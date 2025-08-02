@@ -131,9 +131,13 @@ func InitializeProject(data TemplateData) error {
 		return fmt.Errorf("failed to initialize go module: %w", err)
 	}
 
-	fmt.Println("🧹 Tidying dependencies...")
+	fmt.Println("\n🧹 Tidying dependencies...")
 	if err := runner.TidyGoModule(projectPath); err != nil {
 		return fmt.Errorf("failed to tidy go module: %w", err)
+	}
+	fmt.Println("\n📦 Initializing Git repository...")
+	if err := runner.InitGitRepository(projectPath); err != nil {
+		return fmt.Errorf("failed to initialize git repository: %w", err)
 	}
 
 	return nil

@@ -34,3 +34,8 @@ func InitGoModule(dir, modulePath string) error {
 func TidyGoModule(dir string) error {
 	return ExecuteCommand(dir, "go", "mod", "tidy")
 }
+
+// InitGitRepository runs 'git init' in the specified directory, creating a 'main' branch by default.
+func InitGitRepository(dir string) error {
+	return ExecuteCommand(dir, "git", "init", "-b", "main")
+}
