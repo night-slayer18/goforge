@@ -22,5 +22,5 @@ func New{{.NameTitle}}Handler() *{{.NameTitle}}Handler {
 func (h *{{.NameTitle}}Handler) ExampleHandlerMethod(w http.ResponseWriter, r *http.Request) {
 	// Implement your handler logic here
 	w.WriteHeader(http.StatusOK)
-	w.Write(byte("{{.NameTitle}} handler called"))
+	w.Write([]byte("{{.NameTitle}} handler called"))
 }
