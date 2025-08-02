@@ -7,15 +7,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version
+var version = "1.0.0"
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "goforge",
 	Short: "GoForge is a powerful CLI for scaffolding and managing Go projects.",
 	Long: `GoForge is a NestJS-inspired command-line interface tool that helps you
-initialize, develop, and maintain your Go applications.
-
-It provides a robust, scalable architecture out-of-the-box, allowing you
-to focus on business logic instead of setup and configuration.`,
+	initialize, develop, and maintain your Go applications.
+	It provides a robust, scalable architecture out-of-the-box, allowing you
+	to focus on business logic instead of setup and configuration.`,
+	Version: version,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -30,6 +32,7 @@ func Execute() {
 // init registers all subcommands to the root command. This function is called
 // automatically by Go when the package is initialized.
 func init() {
+	rootCmd.SetVersionTemplate(`{{printf "GoForge CLI Version: %s\n" .Version}}`)
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(generateCmd)
 	rootCmd.AddCommand(runCmd)
