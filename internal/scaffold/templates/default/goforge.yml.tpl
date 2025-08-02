@@ -3,8 +3,10 @@ project_name: "{{.ProjectName}}"
 module_path: "{{.ModuleName}}"
 go_version: "{{.GoVersion}}"
 
-# Dependencies will be added here by 'goforge add <package>'
-dependencies: {}
+# Default dependencies for a robust backend.
+dependencies:
+  github.com/gin-gonic/gin: v1.10.0
+  github.com/spf13/viper: v1.19.0
 
 # Define custom commands that can be run with 'goforge run <script_name>'.
 scripts:
@@ -12,8 +14,7 @@ scripts:
   build: goforge build
   test: go test ./...
 
-# Configure the build process.
+# Configuration for the 'goforge build' command.
 build:
-  # Specify non-Go assets to be copied to the 'dist' directory on build.
   assets:
     - "config/default.yml"

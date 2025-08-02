@@ -1,23 +1,25 @@
-# GoForge build output
-dist/
-{{.ProjectName}}
-
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test binary, built with `go test -c`
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Go workspace file
+# GoForge and Go build artifacts
+/{{.ProjectName}}
+/{{.ProjectName}}.exe
+/dist
+/vendor/
 go.work
+go.work.sum
+
+# Test binaries and coverage reports
+*.test
+*.out
+cover.html
+
+# IDE settings
+.idea/
+.vscode/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
 
 # Environment variables
 .env
-*.env.local
+.env.*
+!.env.example

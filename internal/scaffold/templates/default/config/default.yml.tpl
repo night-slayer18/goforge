@@ -8,3 +8,7 @@ database:
   user: "postgres"
   password: "password"
   dbname: "{{.ProjectName}}"
+
+logging:
+  level: "info"
+  format: "json"

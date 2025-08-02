@@ -1,11 +1,8 @@
-// Package domain contains the core business models and logic.
-// These are the most central and stable parts of the application.
 package domain
 
-// User represents a user in the system.
-// This is a core business entity.
+// User represents a user entity within the system.
 type User struct {
-	ID    int64
-	Email string
-	Name  string
+	ID    int64  `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
 }
