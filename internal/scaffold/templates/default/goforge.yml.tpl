@@ -7,6 +7,7 @@ go_version: "{{.GoVersion}}"
 dependencies:
   github.com/gin-gonic/gin: v1.10.0
   github.com/spf13/viper: v1.19.0
+  github.com/jackc/pgx/v5: v5.6.0
 
 # Define custom commands that can be run with 'goforge run <script_name>'.
 scripts:
