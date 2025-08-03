@@ -47,7 +47,7 @@ goforge new <project-name> [flags]
 
 **Flags:**
 
-* `--module-path`, `-m`: Explicitly set the Go module path. This is **crucial** for ensuring correct import paths if you plan to host your code publicly (e.g., on GitHub). If omitted, it defaults to `github.com/night-slayer18/<project-name>`.
+* `--module-path`, `-m`: Explicitly set the Go module path. This is **crucial** for ensuring correct import paths if you plan to host your code publicly (e.g., on GitHub). If omitted, it defaults to `<project-name>`.
 * `--go`: Specify a Go version for the `go.mod` file. Defaults to the version of Go you are currently using.
 
 **Examples:**
