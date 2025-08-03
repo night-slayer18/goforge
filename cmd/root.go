@@ -38,4 +38,10 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(buildCmd)
+	rootCmd.AddCommand(watchCmd)    // New
+	rootCmd.AddCommand(updateCmd)   // New
+	rootCmd.AddCommand(cleanCmd)    // New
+	
+	// Add global flags
+	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose logging")
 }
