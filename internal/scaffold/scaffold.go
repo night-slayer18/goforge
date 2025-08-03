@@ -376,8 +376,11 @@ func (s *Scaffolder) GenerateComponent(componentType, name string) error {
 	case "middleware":
 		templateFile = "templates/components/middleware.go.tpl"
 		targetFile = filepath.Join(projectRoot, "internal/adapters/http/middleware", fmt.Sprintf("%s.go", snakeName))
+	case "port":
+		templateFile = "templates/components/port.go.tpl"
+		targetFile = filepath.Join(projectRoot, "internal/ports", fmt.Sprintf("%s_port.go", snakeName))
 	default:
-		return fmt.Errorf("unknown component type: %s\n\nAvailable types: handler, service, repository, model, middleware", componentType)
+		return fmt.Errorf("unknown component type: %s\n\nAvailable types: handler, service, repository, model, middleware, port", componentType)
 	}
 
 	task := FileGenerationTask{
@@ -426,5 +429,19 @@ func (s *Scaffolder) showComponentInstructions(componentType, name string) {
 		logger.Info("   1. Define your domain entity fields")
 		logger.Info("   2. Add validation tags if needed")
 		logger.Info("   3. Consider adding business logic methods")
+		
+	case "middleware":
+		logger.Info("")
+		logger.Info("📋 Next steps:")
+		logger.Info("   1. Implement your middleware logic")
+		logger.Info("   2. Register it in your router setup")
+		logger.Info("   3. Apply it to routes or route groups")
+		
+	case "port":
+		logger.Info("")
+		logger.Info("📋 Next steps:")
+		logger.Info("   1. Define your interface methods")
+		logger.Info("   2. Implement these interfaces in your adapters")
+		logger.Info("   3. Use them for dependency injection")
 	}
 }
