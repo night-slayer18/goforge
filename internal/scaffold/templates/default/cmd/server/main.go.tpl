@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
@@ -26,6 +28,11 @@ func main() {
 	port := viper.GetInt("server.port")
 	if port == 0 {
 		port = 8080 // Default port
+	}
+
+	// Wait for port to be available (helpful during development restarts)
+	if err := waitForPort(port, 5*time.Second); err != nil {
+		log.Fatalf("❌ Port %d is not available: %v", port, err)
 	}
 
 	// --- Dependency Injection ---
@@ -73,4 +80,23 @@ func main() {
 	if err := router.Run(serverAddr); err != nil {
 		log.Fatalf("❌ Could not start server: %v", err)
 	}
+}
+
+// waitForPort waits for a port to become available
+func waitForPort(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 100*time.Millisecond)
+		if err != nil {
+			// Port is not in use, which is what we want
+			return nil
+		}
+		conn.Close()
+		
+		// Port is in use, wait a bit and try again
+		time.Sleep(100 * time.Millisecond)
+	}
+	
+	return fmt.Errorf("port %d is still in use after %v", port, timeout)
 }

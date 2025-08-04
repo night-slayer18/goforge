@@ -30,6 +30,7 @@ type Options struct {
 	DestPath    string
 	Template    string
 	SkipGit     bool
+	Verbose     bool  // Add this field
 }
 
 // TemplateData holds all dynamic values needed for file generation
@@ -306,7 +307,7 @@ func (s *Scaffolder) initializeProject(options Options) error {
 	}
 
 	logger.Step(3, 4, "Installing dependencies...")
-	if err := runner.TidyGoModule(options.DestPath); err != nil {
+	if err := runner.TidyGoModuleWithVerbose(options.DestPath, options.Verbose); err != nil {
 		return fmt.Errorf("failed to tidy go module: %w", err)
 	}
 

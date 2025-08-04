@@ -1,4 +1,3 @@
-// internal/runner/runner.go - Enhanced version with better error handling and logging
 package runner
 
 import (
@@ -9,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -223,12 +223,11 @@ func (se *StreamingExecutor) Kill() error {
 }
 
 // InitGoModule runs 'go mod init' with enhanced error handling
-func InitGoModule(dir, modulePath string) error {
-	logger.Debug("Initializing Go module: %s", modulePath)
-	
+func InitGoModule(dir, modulePath string) error {	
 	opts := DefaultOptions()
 	opts.Dir = dir
-	opts.ShowOutput = false // We'll handle output ourselves
+	opts.ShowOutput = false // Hide output for cleaner logs
+	opts.ShowCommand = false // Don't show the command
 	
 	err := ExecuteCommandWithOptions("go", []string{"mod", "init", modulePath}, opts)
 	if err != nil {
@@ -240,20 +239,45 @@ func InitGoModule(dir, modulePath string) error {
 }
 
 // TidyGoModule runs 'go mod tidy' with enhanced error handling
-func TidyGoModule(dir string) error {
+func TidyGoModuleWithVerbose(dir string, verbose bool) error {
 	logger.Debug("Tidying Go module dependencies...")
 	
 	opts := DefaultOptions()
 	opts.Dir = dir
-	opts.Timeout = 2 * time.Minute // Increase timeout for network operations
+	opts.Timeout = 2 * time.Minute
+	opts.ShowOutput = verbose // Show output only if verbose flag is set
+	opts.ShowCommand = verbose
+	
+	var progress *logger.ProgressIndicator
+	if !verbose {
+		// Only show progress indicator when not in verbose mode
+		progress = logger.NewProgress("Installing dependencies...")
+	}
 	
 	err := ExecuteCommandWithOptions("go", []string{"mod", "tidy"}, opts)
+	
+	if progress != nil {
+		progress.Stop()
+	}
+	
 	if err != nil {
+		if !verbose {
+			logger.Error("Failed to install dependencies")
+			logger.Info("💡 Run with --verbose flag to see detailed output")
+		}
 		return fmt.Errorf("failed to tidy Go module: %w\n\nTroubleshooting:\n  • Check your internet connection\n  • Verify go.mod file is valid\n  • Ensure dependencies are accessible\n  • Try running 'go mod tidy' manually for more details", err)
 	}
 	
+	if !verbose {
+		logger.Success("✅ Dependencies installed successfully")
+	}
 	logger.Debug("Go module dependencies tidied successfully")
 	return nil
+}
+
+// Keep the original function for backward compatibility
+func TidyGoModule(dir string) error {
+	return TidyGoModuleWithVerbose(dir, false)
 }
 
 // InitGitRepository runs 'git init' with enhanced error handling
@@ -415,7 +439,8 @@ type WatchMode struct {
 	dir     string
 	command string
 	args    []string
-	process *os.Process
+	cmd     *exec.Cmd
+	mutex   sync.Mutex
 }
 
 // NewWatchMode creates a new watch mode instance
@@ -427,63 +452,125 @@ func NewWatchMode(dir, command string, args ...string) *WatchMode {
 	}
 }
 
-// Start begins watching for file changes and restarting the command
+// Start begins the initial process
 func (w *WatchMode) Start() error {
-	logger.Info("👀 Starting watch mode...")
-	logger.Info("🔄 Watching directory: %s", w.dir)
-	logger.Info("📝 Press Ctrl+C to stop")
-	
-	// Initial run
-	if err := w.restart(); err != nil {
-		return err
-	}
-	
-	// TODO: Implement file watching logic
-	// This would require a file watching library like fsnotify
-	// For now, we'll just run once
-	
-	return nil
+	logger.Debug("Starting watch mode process...")
+	return w.restart()
 }
 
-// restart stops the current process and starts a new one
+// Restart stops the current process and starts a new one
+func (w *WatchMode) Restart() error {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	
+	return w.restart()
+}
+
+// restart is the internal method that handles process restart
 func (w *WatchMode) restart() error {
 	// Stop existing process
-	if w.process != nil {
-		logger.Debug("Stopping existing process...")
-		if err := w.process.Signal(syscall.SIGTERM); err != nil {
-			w.process.Kill()
+	if w.cmd != nil && w.cmd.Process != nil {
+		logger.Debug("Stopping existing process (PID: %d)...", w.cmd.Process.Pid)
+		
+		// Try graceful shutdown first
+		if err := w.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			logger.Debug("SIGTERM failed, using SIGKILL: %v", err)
+			w.cmd.Process.Kill()
 		}
-		w.process.Wait()
+		
+		// Wait for process to exit with timeout
+		done := make(chan error, 1)
+		go func() {
+			_, err := w.cmd.Process.Wait()
+			done <- err
+		}()
+		
+		select {
+		case <-done:
+			logger.Debug("Process stopped gracefully")
+		case <-time.After(5 * time.Second):
+			logger.Debug("Process didn't stop gracefully, killing...")
+			w.cmd.Process.Kill()
+			w.cmd.Process.Wait()
+		}
+		
+		w.cmd = nil
 	}
 	
 	// Start new process
-	logger.Info("🔄 Restarting: %s %s", w.command, strings.Join(w.args, " "))
+	logger.Info("🔄 Starting: %s %s", w.command, strings.Join(w.args, " "))
 	
-	cmd := exec.Command(w.command, w.args...)
-	cmd.Dir = w.dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	w.cmd = exec.Command(w.command, w.args...)
+	w.cmd.Dir = w.dir
+	w.cmd.Stdout = os.Stdout
+	w.cmd.Stderr = os.Stderr
+	w.cmd.Stdin = os.Stdin
 	
-	if err := cmd.Start(); err != nil {
+	// Set process group to handle child processes properly
+	w.cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+	
+	if err := w.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start process: %w", err)
 	}
 	
-	w.process = cmd.Process
-	logger.Info("✅ Process started (PID: %d)", w.process.Pid)
+	logger.Success("✅ Process started (PID: %d)", w.cmd.Process.Pid)
+	
+	// Monitor process in background
+	go func() {
+		if err := w.cmd.Wait(); err != nil {
+			// Only log if it's not an expected termination
+			if exitError, ok := err.(*exec.ExitError); ok {
+				// Check if process was killed by signal (expected during restart)
+				if exitError.ProcessState.Success() || strings.Contains(err.Error(), "signal:") {
+					logger.Debug("Process terminated by signal (expected during restart)")
+				} else {
+					logger.Error("Process exited with error: %v", err)
+				}
+			}
+		}
+	}()
 	
 	return nil
 }
 
 // Stop terminates the watch mode
 func (w *WatchMode) Stop() error {
-	if w.process != nil {
-		logger.Info("🛑 Stopping watch mode...")
-		err := w.process.Signal(syscall.SIGTERM)
-		if err != nil {
-			return w.process.Kill()
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	
+	if w.cmd != nil && w.cmd.Process != nil {
+		logger.Debug("Stopping watch mode process...")
+		
+		// Kill the entire process group to handle child processes
+		pgid, err := syscall.Getpgid(w.cmd.Process.Pid)
+		if err == nil {
+			syscall.Kill(-pgid, syscall.SIGTERM)
+		} else {
+			w.cmd.Process.Signal(syscall.SIGTERM)
 		}
-		_, err = w.process.Wait()
-		return err
+		
+		// Wait for process to exit
+		done := make(chan error, 1)
+		go func() {
+			_, err := w.cmd.Process.Wait()
+			done <- err
+		}()
+		
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(5 * time.Second):
+			// Force kill if it doesn't stop gracefully
+			if pgid, err := syscall.Getpgid(w.cmd.Process.Pid); err == nil {
+				syscall.Kill(-pgid, syscall.SIGKILL)
+			} else {
+				w.cmd.Process.Kill()
+			}
+			w.cmd.Process.Wait()
+			return nil
+		}
 	}
 	return nil
 }

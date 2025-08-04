@@ -66,15 +66,15 @@ var newCmd = &cobra.Command{
 	Use:   "new <project-name>",
 	Short: "Create a new Go project with a scalable architecture",
 	Long: `The 'new' command creates a new directory with the specified project name,
-and scaffolds a complete Go application based on Clean Architecture principles.
+    and scaffolds a complete Go application based on Clean Architecture principles.
 
-It sets up the entire project structure, including handlers, services, repositories,
-a go.mod file, and a goforge.yml project manifest.
+	It sets up the entire project structure, including handlers, services, repositories,
+	a go.mod file, and a goforge.yml project manifest.
 
-Examples:
-  goforge new my-api
-  goforge new user-service --module-path github.com/myorg/user-service
-  goforge new blog-app -m gitlab.com/company/blog-app`,
+	Examples:
+  		goforge new my-api
+  		goforge new user-service --module-path github.com/myorg/user-service
+  		goforge new blog-app -m gitlab.com/company/blog-app`,
 	
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -92,6 +92,7 @@ Examples:
 		modulePath, _ := cmd.Flags().GetString("module-path")
 		skipGit, _ := cmd.Flags().GetBool("skip-git")
 		template, _ := cmd.Flags().GetString("template")
+		verbose, _ := cmd.Flags().GetBool("verbose") 
 		
 		// Initialize validator
 		validator := validation.NewProjectValidator()
@@ -160,6 +161,7 @@ Examples:
 			DestPath:    destPath,
 			Template:    template,
 			SkipGit:     skipGit,
+			Verbose:     verbose,
 		}
 		
 		if err := scaffold.CreateProjectWithOptions(scaffoldOptions); err != nil {
@@ -178,18 +180,18 @@ Examples:
 		logger.ProjectCreationComplete(projectName, duration)
 		
 		// Show additional information
-		showPostCreationInfo(projectName, modulePath)
+		showPostCreationInfo(projectName, modulePath,destPath)
 		
 		return nil
 	},
 }
 
 // showPostCreationInfo displays helpful information after project creation
-func showPostCreationInfo(projectName, modulePath string) {
+func showPostCreationInfo(projectName, modulePath string, destPath string) {
 	logger.Info("📋 Project Information:")
 	logger.Info("   Name: %s", projectName)
 	logger.Info("   Module: %s", modulePath)
-	logger.Info("   Location: %s", filepath.Join(".", projectName))
+	logger.Info("   Location: %s", destPath)
 	logger.Info("")
 	
 	logger.Info("🛠️  Available Commands:")
