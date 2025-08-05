@@ -1,11 +1,16 @@
-// cmd/watch.go - Enhanced version with actual file watching
 package cmd
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"io"
+	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -13,8 +18,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/night-slayer18/goforge/internal/logger"
 	"github.com/night-slayer18/goforge/internal/project"
-	"github.com/night-slayer18/goforge/internal/runner"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var watchCmd = &cobra.Command{
@@ -24,7 +29,8 @@ var watchCmd = &cobra.Command{
 restarts the specified script when changes are detected. If no script is specified,
 it defaults to the 'dev' script.
 
-This is useful for development workflows where you want automatic reloading.
+GoForge handles all process management, port cleanup, and graceful restarts internally.
+Your application code stays clean and simple.
 
 Examples:
   goforge watch           # Watch and run 'dev' script
@@ -53,217 +59,549 @@ Examples:
 				scriptName, formatAvailableScripts(cfg.Scripts))
 		}
 
-		logger.Info("👀 Starting watch mode for script: %s", scriptName)
-		logger.Info("📝 Command: %s", script)
+		logger.Info("👀 Starting GoForge watch mode")
+		logger.Info("📝 Script: %s → %s", scriptName, script)
 		logger.Info("📁 Watching: %s", projectRoot)
 		logger.Info("🔄 Press Ctrl+C to stop")
 		logger.Info("")
 
-		// Create file watcher
-		watcher, err := NewFileWatcher(projectRoot)
-		if err != nil {
-			return fmt.Errorf("failed to create file watcher: %w", err)
-		}
+		// Create the advanced watcher
+		watcher := NewAdvancedWatcher(projectRoot, script, verbose)
 		defer watcher.Close()
 
 		// Set up graceful shutdown
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-		// Start watch mode
-		watchMode := runner.NewWatchMode(projectRoot, "sh", "-c", script)
-		if err := watchMode.Start(); err != nil {
-			return fmt.Errorf("failed to start watch mode: %w", err)
+		// Start the watcher
+		if err := watcher.Start(); err != nil {
+			return fmt.Errorf("failed to start watcher: %w", err)
 		}
 
-		// File change handling
-		debouncer := NewDebouncer(1 * time.Second) // Increase debounce time
-		lastRestart := time.Now().Add(-10 * time.Second) // Allow immediate first restart
+		// Wait for shutdown signal
+		<-sigChan
+		logger.Info("\n🛑 Shutting down...")
 		
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return nil
-				}
-				
-				if watcher.ShouldIgnore(event.Name) {
-					logger.Debug("Ignoring file change: %s", event.Name)
-					continue
-				}
-
-				// Only care about write and create events for Go files
-				if event.Op&fsnotify.Write == 0 && event.Op&fsnotify.Create == 0 {
-					continue
-				}
-
-				logger.Debug("File changed: %s (%s)", event.Name, event.Op)
-				
-				// Prevent too frequent restarts
-				if time.Since(lastRestart) < 2*time.Second {
-					logger.Debug("Restart too recent, debouncing...")
-					continue
-				}
-				
-				// Debounce rapid file changes
-				debouncer.Debounce(func() {
-					lastRestart = time.Now()
-					logger.Info("🔄 Files changed, restarting...")
-					if err := watchMode.Restart(); err != nil {
-						logger.Error("Failed to restart: %v", err)
-					}
-				})
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return nil
-				}
-				logger.Warn("Watch error: %v", err)
-
-			case <-sigChan:
-				logger.Info("\n🛑 Shutting down...")
-				if err := watchMode.Stop(); err != nil {
-					logger.Error("Error stopping watch mode: %v", err)
-					return err
-				}
-				logger.Info("✅ Watch mode stopped")
-				return nil
-			}
+		if err := watcher.Stop(); err != nil {
+			logger.Error("Error during shutdown: %v", err)
+		} else {
+			logger.Info("✅ GoForge watch mode stopped")
 		}
+
+		return nil
 	},
 }
 
-// FileWatcher wraps fsnotify.Watcher with project-specific logic
-type FileWatcher struct {
-	*fsnotify.Watcher
-	projectRoot string
-	ignorePaths []string
+// AdvancedWatcher handles all the complexity of file watching and process management
+type AdvancedWatcher struct {
+	projectRoot    string
+	script         string
+	verbose        bool
+	fileWatcher    *fsnotify.Watcher
+	processManager *ProcessManager
+	portManager    *PortManager
+	debouncer      *Debouncer
+	
+	// Configuration from project
+	projectPort    int
+	watchPatterns  []string
+	ignorePatterns []string
 }
 
-// NewFileWatcher creates a new file watcher for the project
-func NewFileWatcher(projectRoot string) (*FileWatcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, err
-	}
-
-	fw := &FileWatcher{
-		Watcher:     watcher,
+// NewAdvancedWatcher creates a new advanced watcher
+func NewAdvancedWatcher(projectRoot, script string, verbose bool) *AdvancedWatcher {
+	watcher := &AdvancedWatcher{
 		projectRoot: projectRoot,
-		ignorePaths: []string{
-			"dist",
-			"vendor",
-			"node_modules",
-			".git",
-			".idea",
-			".vscode",
-			"*.test",
-			"*.out",
-			"coverage.html",
-		},
+		script:      script,
+		verbose:     verbose,
+		debouncer:   NewDebouncer(1500 * time.Millisecond), // Smart debouncing
 	}
-
-	// Add project root and subdirectories to watch
-	if err := fw.addWatchPaths(); err != nil {
-		watcher.Close()
-		return nil, err
-	}
-
-	return fw, nil
+	
+	watcher.loadProjectConfig()
+	
+	return watcher
 }
 
-// addWatchPaths recursively adds directories to watch
-func (fw *FileWatcher) addWatchPaths() error {
-	return filepath.Walk(fw.projectRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip non-directories
-		if !info.IsDir() {
-			return nil
-		}
-
-		// Check if this path should be ignored
-		relPath, err := filepath.Rel(fw.projectRoot, path)
-		if err != nil {
-			return err
-		}
-
-		if fw.shouldIgnorePath(relPath) {
-			logger.Debug("Ignoring directory: %s", relPath)
-			return filepath.SkipDir
-		}
-
-		logger.Debug("Watching directory: %s", relPath)
-		return fw.Add(path)
-	})
+// loadProjectConfig loads project-specific configuration
+func (aw *AdvancedWatcher) loadProjectConfig() {
+	// Try to load viper config to detect port
+	viper.SetConfigName("default")
+	viper.SetConfigType("yml")
+	viper.AddConfigPath(filepath.Join(aw.projectRoot, "config"))
+	
+	if err := viper.ReadInConfig(); err == nil {
+		aw.projectPort = viper.GetInt("server.port")
+	}
+	
+	if aw.projectPort == 0 {
+		aw.projectPort = 8080 // Default
+	}
+	
+	// Set up default watch patterns
+	aw.watchPatterns = []string{
+		"**/*.go",
+		"**/*.yml",
+		"**/*.yaml",
+		"**/*.json",
+	}
+	
+	aw.ignorePatterns = []string{
+		"**/*_test.go",
+		"dist/**",
+		"vendor/**",
+		".git/**",
+		"node_modules/**",
+		"**/*.tmp",
+		"**/*.log",
+	}
+	
+	logger.Debug("Detected project port: %d", aw.projectPort)
 }
 
-// shouldIgnorePath checks if a path should be ignored based on patterns
-func (fw *FileWatcher) shouldIgnorePath(path string) bool {
-	for _, pattern := range fw.ignorePaths {
-		if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
+// Start begins watching and starts the initial process
+func (aw *AdvancedWatcher) Start() error {
+	var err error
+	
+	// Initialize file watcher
+	aw.fileWatcher, err = fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("failed to create file watcher: %w", err)
+	}
+	
+	// Initialize process manager
+	aw.processManager = NewProcessManager(aw.projectRoot, aw.script, aw.verbose)
+	
+	// Initialize port manager
+	aw.portManager = NewPortManager()
+	
+	// Add directories to watch
+	if err := aw.addWatchPaths(); err != nil {
+		return fmt.Errorf("failed to setup watch paths: %w", err)
+	}
+	
+	// Start the initial process
+	logger.Info("🚀 Starting initial process...")
+	if err := aw.processManager.Start(); err != nil {
+		return fmt.Errorf("failed to start initial process: %w", err)
+	}
+	
+	// Start watching for file changes
+	go aw.watchLoop()
+	
+	return nil
+}
+
+// watchLoop handles file change events
+func (aw *AdvancedWatcher) watchLoop() {
+	lastRestart := time.Now().Add(-10 * time.Second)
+	
+	for {
+		select {
+		case event, ok := <-aw.fileWatcher.Events:
+			if !ok {
+				return
+			}
+			
+			if aw.shouldIgnoreEvent(event) {
+				continue
+			}
+			
+			logger.Debug("File changed: %s (%s)", event.Name, event.Op)
+			
+			// Prevent rapid restarts
+			if time.Since(lastRestart) < 2*time.Second {
+				logger.Debug("Ignoring change - too soon after last restart")
+				continue
+			}
+			
+			// Debounce the restart
+			aw.debouncer.Debounce(func() {
+				lastRestart = time.Now()
+				logger.Info("🔄 Changes detected, restarting...")
+				
+				if err := aw.smartRestart(); err != nil {
+					logger.Error("Failed to restart: %v", err)
+				}
+			})
+			
+		case err, ok := <-aw.fileWatcher.Errors:
+			if !ok {
+				return
+			}
+			logger.Warn("File watcher error: %v", err)
+		}
+	}
+}
+
+// smartRestart performs an intelligent restart with port management
+func (aw *AdvancedWatcher) smartRestart() error {
+	// Step 1: Stop the current process gracefully
+	logger.Debug("Stopping current process...")
+	if err := aw.processManager.Stop(); err != nil {
+		logger.Warn("Error stopping process: %v", err)
+	}
+	
+	// Step 2: Ensure port is available
+	logger.Debug("Ensuring port %d is available...", aw.projectPort)
+	if err := aw.portManager.EnsurePortAvailable(aw.projectPort, 8*time.Second); err != nil {
+		logger.Warn("Port cleanup may have failed: %v", err)
+		// Continue anyway - the process start might still work
+	}
+	
+	// Step 3: Wait a moment for system cleanup
+	time.Sleep(500 * time.Millisecond)
+	
+	// Step 4: Start new process
+	logger.Debug("Starting new process...")
+	if err := aw.processManager.Start(); err != nil {
+		return fmt.Errorf("failed to start new process: %w", err)
+	}
+	
+	logger.Success("✅ Process restarted successfully")
+	return nil
+}
+
+// shouldIgnoreEvent determines if a file change event should be ignored
+func (aw *AdvancedWatcher) shouldIgnoreEvent(event fsnotify.Event) bool {
+	// Only care about write and create events
+	if event.Op&fsnotify.Write == 0 && event.Op&fsnotify.Create == 0 {
+		return true
+	}
+	
+	relPath, err := filepath.Rel(aw.projectRoot, event.Name)
+	if err != nil {
+		return true
+	}
+	
+	// Check ignore patterns
+	for _, pattern := range aw.ignorePatterns {
+		if matched, _ := filepath.Match(pattern, relPath); matched {
 			return true
 		}
-		// Also check if any part of the path matches
-		parts := strings.Split(path, string(filepath.Separator))
-		for _, part := range parts {
-			if matched, _ := filepath.Match(pattern, part); matched {
+		
+		// Check if any directory in the path matches
+		dirs := strings.Split(filepath.Dir(relPath), string(filepath.Separator))
+		for _, dir := range dirs {
+			if matched, _ := filepath.Match(strings.TrimSuffix(pattern, "/**"), dir); matched {
 				return true
 			}
 		}
 	}
+	
+	// Check if file matches watch patterns
+	for _, pattern := range aw.watchPatterns {
+		if matched, _ := filepath.Match(pattern, relPath); matched {
+			return false // Should watch this file
+		}
+		
+		// Check extension-based patterns
+		if strings.HasPrefix(pattern, "**/*") {
+			ext := strings.TrimPrefix(pattern, "**/*")
+			if strings.HasSuffix(relPath, ext) {
+				return false // Should watch this file
+			}
+		}
+	}
+	
+	return true // Ignore by default
+}
+
+// addWatchPaths recursively adds directories to the file watcher
+func (aw *AdvancedWatcher) addWatchPaths() error {
+	return filepath.Walk(aw.projectRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		
+		if !info.IsDir() {
+			return nil
+		}
+		
+		relPath, err := filepath.Rel(aw.projectRoot, path)
+		if err != nil {
+			return err
+		}
+		
+		// Check if directory should be ignored
+		for _, pattern := range aw.ignorePatterns {
+			dirPattern := strings.TrimSuffix(pattern, "/**")
+			if matched, _ := filepath.Match(dirPattern, relPath); matched {
+				logger.Debug("Ignoring directory: %s", relPath)
+				return filepath.SkipDir
+			}
+		}
+		
+		logger.Debug("Watching directory: %s", relPath)
+		return aw.fileWatcher.Add(path)
+	})
+}
+
+// Stop stops the watcher and cleans up resources
+func (aw *AdvancedWatcher) Stop() error {
+	var errs []error
+	
+	if aw.processManager != nil {
+		if err := aw.processManager.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("process manager: %w", err))
+		}
+	}
+	
+	if aw.fileWatcher != nil {
+		if err := aw.fileWatcher.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("file watcher: %w", err))
+		}
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("shutdown errors: %v", errs)
+	}
+	
+	return nil
+}
+
+// Close is an alias for Stop for consistency
+func (aw *AdvancedWatcher) Close() error {
+	return aw.Stop()
+}
+
+// ProcessManager handles process lifecycle with enhanced control
+type ProcessManager struct {
+	dir      string
+	script   string
+	verbose  bool
+	cmd      *exec.Cmd
+	ctx      context.Context
+	cancel   context.CancelFunc
+}
+
+// NewProcessManager creates a new process manager
+func NewProcessManager(dir, script string, verbose bool) *ProcessManager {
+	return &ProcessManager{
+		dir:     dir,
+		script:  script,
+		verbose: verbose,
+	}
+}
+
+// Start starts the process
+func (pm *ProcessManager) Start() error {
+	pm.ctx, pm.cancel = context.WithCancel(context.Background())
+	
+	pm.cmd = exec.CommandContext(pm.ctx, "sh", "-c", pm.script)
+	pm.cmd.Dir = pm.dir
+	
+	// Set up process group for better control
+	pm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	
+	if pm.verbose {
+		pm.cmd.Stdout = os.Stdout
+		pm.cmd.Stderr = os.Stderr
+	} else {
+		// Capture output for smart filtering
+		stdout, err := pm.cmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		stderr, err := pm.cmd.StderrPipe()
+		if err != nil {
+			return err
+		}
+		
+		// Filter and display output
+		go pm.handleOutput(stdout, false)
+		go pm.handleOutput(stderr, true)
+	}
+	
+	if err := pm.cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start process: %w", err)
+	}
+	
+	logger.Success("✅ Process started (PID: %d)", pm.cmd.Process.Pid)
+	
+	// Monitor process completion
+	go func() {
+		err := pm.cmd.Wait()
+		if err != nil && pm.ctx.Err() == nil {
+			// Process died unexpectedly (not due to cancellation)
+			logger.Error("❌ Process exited unexpectedly: %v", err)
+		}
+	}()
+	
+	return nil
+}
+
+// handleOutput processes stdout/stderr with smart filtering
+func (pm *ProcessManager) handleOutput(pipe io.Reader, isError bool) {
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		
+		// Filter out noise
+		if pm.shouldFilterLine(line) {
+			continue
+		}
+		
+		if isError {
+			logger.Error("🔴 %s", line)
+		} else {
+			// Highlight important messages
+			if pm.isImportantLine(line) {
+				logger.Success("🟢 %s", line)
+			} else {
+				logger.Info("⚪ %s", line)
+			}
+		}
+	}
+}
+
+// shouldFilterLine determines if a log line should be filtered out
+func (pm *ProcessManager) shouldFilterLine(line string) bool {
+	noisePatterns := []string{
+		"[GIN-debug]",
+		"Listening and serving HTTP",
+	}
+	
+	for _, pattern := range noisePatterns {
+		if strings.Contains(line, pattern) {
+			return true
+		}
+	}
+	
 	return false
 }
 
-// ShouldIgnore checks if a file change event should be ignored
-func (fw *FileWatcher) ShouldIgnore(filename string) bool {
-	// Get relative path
-	relPath, err := filepath.Rel(fw.projectRoot, filename)
+// isImportantLine determines if a log line is important
+func (pm *ProcessManager) isImportantLine(line string) bool {
+	importantPatterns := []string{
+		"Server starting",
+		"🚀",
+		"✅",
+		"Ready",
+		"Started",
+	}
+	
+	for _, pattern := range importantPatterns {
+		if strings.Contains(line, pattern) {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// Stop stops the process gracefully
+func (pm *ProcessManager) Stop() error {
+	if pm.cmd == nil || pm.cmd.Process == nil {
+		return nil
+	}
+	
+	logger.Debug("Stopping process (PID: %d)...", pm.cmd.Process.Pid)
+	
+	// Cancel context first
+	if pm.cancel != nil {
+		pm.cancel()
+	}
+	
+	// Get process group ID
+	pgid, err := syscall.Getpgid(pm.cmd.Process.Pid)
 	if err != nil {
-		return true
+		pgid = pm.cmd.Process.Pid
 	}
-
-	// Ignore based on directory patterns
-	if fw.shouldIgnorePath(relPath) {
-		return true
+	
+	// Send SIGTERM to process group
+	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+		// Fallback to killing just the process
+		pm.cmd.Process.Signal(syscall.SIGTERM)
 	}
-
-	// Only watch Go files and config files
-	ext := filepath.Ext(filename)
-	if ext != ".go" && ext != ".yml" && ext != ".yaml" && ext != ".json" && ext != ".mod" && ext != ".sum" {
-		return true
+	
+	// Wait with timeout for graceful shutdown
+	done := make(chan error, 1)
+	go func() {
+		_, err := pm.cmd.Process.Wait()
+		done <- err
+	}()
+	
+	select {
+	case <-done:
+		logger.Debug("Process stopped gracefully")
+	case <-time.After(3 * time.Second):
+		logger.Debug("Process didn't stop gracefully, force killing...")
+		syscall.Kill(-pgid, syscall.SIGKILL)
+		<-done // Wait for force kill to complete
 	}
-
-	// Ignore test files during development (they don't affect the running server)
-	if strings.HasSuffix(filename, "_test.go") {
-		return true
-	}
-
-	// Ignore temporary files and editor artifacts
-	base := filepath.Base(filename)
-	if strings.HasPrefix(base, ".") || 
-	   strings.HasPrefix(base, "~") || 
-	   strings.HasSuffix(base, ".tmp") ||
-	   strings.HasSuffix(base, ".swp") ||
-	   strings.HasSuffix(base, ".swo") ||
-	   strings.Contains(base, "#") {
-		return true
-	}
-
-	// Ignore generated files
-	if strings.Contains(relPath, "/.git/") ||
-	   strings.Contains(relPath, "/vendor/") ||
-	   strings.Contains(relPath, "/node_modules/") {
-		return true
-	}
-
-	logger.Debug("Will watch file: %s", relPath)
-	return false
+	
+	pm.cmd = nil
+	return nil
 }
 
-// Debouncer helps prevent rapid successive restarts
+// PortManager handles port availability and cleanup
+type PortManager struct{}
+
+// NewPortManager creates a new port manager
+func NewPortManager() *PortManager {
+	return &PortManager{}
+}
+
+// EnsurePortAvailable ensures a port is available, with cleanup if necessary
+func (pm *PortManager) EnsurePortAvailable(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	
+	for time.Now().Before(deadline) {
+		if pm.isPortAvailable(port) {
+			return nil
+		}
+		
+		logger.Debug("Port %d still in use, attempting cleanup...", port)
+		pm.attemptPortCleanup(port)
+		
+		time.Sleep(500 * time.Millisecond)
+	}
+	
+	return fmt.Errorf("port %d is still not available after %v", port, timeout)
+}
+
+// isPortAvailable checks if a port is available
+func (pm *PortManager) isPortAvailable(port int) bool {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false
+	}
+	listener.Close()
+	return true
+}
+
+// attemptPortCleanup tries to free up a port
+func (pm *PortManager) attemptPortCleanup(port int) {
+	// Use lsof to find and kill processes using the port
+	cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
+	output, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	
+	pidStr := strings.TrimSpace(string(output))
+	if pidStr == "" {
+		return
+	}
+	
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return
+	}
+	
+	logger.Debug("Killing process %d using port %d", pid, port)
+	if process, err := os.FindProcess(pid); err == nil {
+		process.Signal(syscall.SIGTERM)
+		
+		// Wait a moment, then force kill if needed
+		time.Sleep(1 * time.Second)
+		if !pm.isPortAvailable(port) {
+			process.Kill()
+		}
+	}
+}
+
+// Debouncer prevents rapid successive calls
 type Debouncer struct {
 	duration time.Duration
 	timer    *time.Timer
@@ -274,13 +612,11 @@ func NewDebouncer(duration time.Duration) *Debouncer {
 	return &Debouncer{duration: duration}
 }
 
-// Debounce executes the function after the specified delay, 
-// canceling any previous pending execution
+// Debounce executes the function after the specified delay
 func (d *Debouncer) Debounce(fn func()) {
 	if d.timer != nil {
 		d.timer.Stop()
 	}
-	
 	d.timer = time.AfterFunc(d.duration, fn)
 }
 

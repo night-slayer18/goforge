@@ -40,7 +40,7 @@ func checkPrerequisites() error {
 	
 	// Check Go installation
 	if _, err := exec.LookPath("go"); err != nil {
-		return fmt.Errorf("Go is not installed or not in PATH. Please install Go from https://golang.org/dl/")
+		return fmt.Errorf("go is not installed or not in PATH. Please install Go from https://golang.org/dl/")
 	}
 	
 	// Check Git installation (optional but recommended)
@@ -222,14 +222,14 @@ func init() {
 	
 	// Add examples
 	newCmd.Example = `  # Create a simple project
-  goforge new my-api
+						goforge new my-api
 
-  # Create with custom module path
-  goforge new user-service -m github.com/myorg/user-service
+						# Create with custom module path
+						goforge new user-service -m github.com/myorg/user-service
 
-  # Create with verbose output
-  goforge new blog-app --verbose
+						# Create with verbose output
+						goforge new blog-app --verbose
 
-  # Create without Git initialization
-  goforge new simple-app --skip-git`
+						# Create without Git initialization
+						goforge new simple-app --skip-git`
 }
