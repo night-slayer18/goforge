@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/night-slayer18/goforge/internal/interactive"
 	"github.com/night-slayer18/goforge/internal/logger"
 	"github.com/night-slayer18/goforge/internal/scaffold"
 	"github.com/night-slayer18/goforge/internal/validation"
@@ -63,20 +64,21 @@ func checkDirectoryExists(projectName string) error {
 
 // newCmd represents the 'new' command, responsible for creating new projects.
 var newCmd = &cobra.Command{
-	Use:   "new <project-name>",
+	Use:   "new [project-name]",
 	Short: "Create a new Go project with a scalable architecture",
 	Long: `The 'new' command creates a new directory with the specified project name,
-    and scaffolds a complete Go application based on Clean Architecture principles.
+and scaffolds a complete Go application based on Clean Architecture principles.
 
-	It sets up the entire project structure, including handlers, services, repositories,
-	a go.mod file, and a goforge.yml project manifest.
+It sets up the entire project structure, including handlers, services, repositories,
+a go.mod file, and a goforge.yml project manifest.
 
-	Examples:
-  		goforge new my-api
-  		goforge new user-service --module-path github.com/myorg/user-service
-  		goforge new blog-app -m gitlab.com/company/blog-app`,
+Examples:
+  goforge new my-api
+  goforge new user-service --module-path github.com/myorg/user-service
+  goforge new blog-app -m gitlab.com/company/blog-app
+  goforge new --interactive           # Use interactive mode`,
 	
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1), // Changed from ExactArgs(1) to allow interactive mode
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		// Set up logging based on verbose flag
 		verbose, _ := cmd.Flags().GetBool("verbose")
@@ -86,18 +88,74 @@ var newCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		startTime := time.Now()
-		projectName := args[0]
 		
 		// Get flags
 		modulePath, _ := cmd.Flags().GetString("module-path")
 		skipGit, _ := cmd.Flags().GetBool("skip-git")
 		template, _ := cmd.Flags().GetString("template")
-		verbose, _ := cmd.Flags().GetBool("verbose") 
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		interactiveFlag, _ := cmd.Flags().GetBool("interactive")
+		
+		var projectName string
+		var finalModulePath string
+		var finalTemplate string
+		var finalSkipGit bool
+		var finalVerbose bool
+		
+		// Determine if we should use interactive mode
+		useInteractive := false
+		
+		if interactiveFlag {
+			// Explicitly requested interactive mode
+			if !interactive.IsInteractiveTerminal() {
+				return fmt.Errorf("interactive mode requested but not running in an interactive terminal")
+			}
+			useInteractive = true
+		} else if len(args) == 0 && interactive.IsInteractiveTerminal() {
+			// No project name provided and we're in a terminal - offer interactive mode
+			useInteractive = interactive.PromptForInteractiveMode()
+		} else if len(args) == 0 {
+			// No project name and not interactive - show error
+			return fmt.Errorf("project name is required when not using interactive mode\n\nUsage:\n  goforge new <project-name>\n  goforge new --interactive")
+		}
+		
+		if useInteractive {
+			// Use interactive mode
+			session := interactive.NewInteractiveSession()
+			options, err := session.RunProjectCreationWizard()
+			if err != nil {
+				return fmt.Errorf("interactive session failed: %w", err)
+			}
+			
+			projectName = options.ProjectName
+			finalModulePath = options.ModulePath
+			finalTemplate = options.Template
+			finalSkipGit = options.SkipGit
+			finalVerbose = options.Verbose || verbose // Respect CLI flag if set
+			
+		} else {
+			// Use traditional command-line mode
+			projectName = args[0]
+			finalModulePath = modulePath
+			finalTemplate = template
+			finalSkipGit = skipGit
+			finalVerbose = verbose
+			
+			// Set defaults for traditional mode
+			if finalModulePath == "" {
+				finalModulePath = projectName
+				logger.Debug("Using default module path: %s", finalModulePath)
+			}
+			
+			if finalTemplate == "" {
+				finalTemplate = "default"
+			}
+		}
 		
 		// Initialize validator
 		validator := validation.NewProjectValidator()
 		
-		// Validate project name
+		// Validate project name (same for both modes)
 		if err := validator.ValidateProjectName(projectName); err != nil {
 			if validationErr, ok := err.(*validation.ValidationError); ok {
 				logger.ValidationError(validationErr.Field, validationErr.Value, validationErr.Message, validationErr.Suggestions)
@@ -106,14 +164,8 @@ var newCmd = &cobra.Command{
 			return err
 		}
 		
-		// Set default module path if not provided
-		if modulePath == "" {
-			modulePath = projectName
-			logger.Debug("Using default module path: %s", modulePath)
-		}
-		
-		// Validate module path
-		if err := validator.ValidateModulePath(modulePath); err != nil {
+		// Validate module path (same for both modes)
+		if err := validator.ValidateModulePath(finalModulePath); err != nil {
 			if validationErr, ok := err.(*validation.ValidationError); ok {
 				logger.ValidationError(validationErr.Field, validationErr.Value, validationErr.Message, validationErr.Suggestions)
 				return fmt.Errorf("invalid module path")
@@ -144,10 +196,13 @@ var newCmd = &cobra.Command{
 		// Start project creation
 		logger.ProjectCreationStart(projectName)
 		logger.Info("📍 Location: %s", destPath)
-		logger.Info("📦 Module: %s", modulePath)
+		logger.Info("📦 Module: %s", finalModulePath)
 		logger.Info("🐹 Go version: %s", goVersion)
-		if template != "default" {
-			logger.Info("📋 Template: %s", template)
+		if finalTemplate != "default" {
+			logger.Info("📋 Template: %s", finalTemplate)
+		}
+		if useInteractive {
+			logger.Info("🎯 Mode: Interactive")
 		}
 		logger.Info("")
 		
@@ -156,12 +211,12 @@ var newCmd = &cobra.Command{
 		
 		scaffoldOptions := scaffold.Options{
 			ProjectName: projectName,
-			ModulePath:  modulePath,
+			ModulePath:  finalModulePath,
 			GoVersion:   goVersion,
 			DestPath:    destPath,
-			Template:    template,
-			SkipGit:     skipGit,
-			Verbose:     verbose,
+			Template:    finalTemplate,
+			SkipGit:     finalSkipGit,
+			Verbose:     finalVerbose,
 		}
 		
 		if err := scaffold.CreateProjectWithOptions(scaffoldOptions); err != nil {
@@ -180,7 +235,7 @@ var newCmd = &cobra.Command{
 		logger.ProjectCreationComplete(projectName, duration)
 		
 		// Show additional information
-		showPostCreationInfo(projectName, modulePath,destPath)
+		showPostCreationInfo(projectName, finalModulePath, destPath)
 		
 		return nil
 	},
@@ -220,16 +275,24 @@ func init() {
 	newCmd.Flags().BoolP("verbose", "v", false, 
 		"Enable verbose logging")
 	
+	// NEW: Interactive mode flag
+	newCmd.Flags().BoolP("interactive", "i", false, 
+		"Use interactive mode for project creation")
+	
 	// Add examples
 	newCmd.Example = `  # Create a simple project
-						goforge new my-api
+  goforge new my-api
 
-						# Create with custom module path
-						goforge new user-service -m github.com/myorg/user-service
+  # Create with custom module path
+  goforge new user-service -m github.com/myorg/user-service
 
-						# Create with verbose output
-						goforge new blog-app --verbose
+  # Create with verbose output
+  goforge new blog-app --verbose
 
-						# Create without Git initialization
-						goforge new simple-app --skip-git`
+  # Create without Git initialization
+  goforge new simple-app --skip-git
+  
+  # Use interactive mode
+  goforge new --interactive
+  goforge new -i`
 }

@@ -8,20 +8,23 @@ import (
 )
 
 // version
-var version = "1.1.1"
+var version = "1.1.2"
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "goforge",
 	Short: "GoForge is a powerful CLI for scaffolding and managing Go projects.",
 	Long: `GoForge is a NestJS-inspired command-line interface tool that helps you
-	initialize, develop, and maintain your Go applications.
-	It provides a robust, scalable architecture out-of-the-box, allowing you
-	to focus on business logic instead of setup and configuration.`,
+initialize, develop, and maintain your Go applications.
+It provides a robust, scalable architecture out-of-the-box, allowing you
+to focus on business logic instead of setup and configuration.
+
+Interactive Mode:
+  GoForge supports both traditional command-line and interactive modes.
+  Use --interactive flag or run commands without arguments to access
+  the guided interactive experience.`,
 	Version: version,
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := rootCmd.Execute(); err!= nil {
 		fmt.Println(err)
@@ -29,8 +32,6 @@ func Execute() {
 	}
 }
 
-// init registers all subcommands to the root command. This function is called
-// automatically by Go when the package is initialized.
 func init() {
 	rootCmd.SetVersionTemplate(`{{printf "GoForge CLI Version: %s\n" .Version}}`)
 	rootCmd.AddCommand(newCmd)
@@ -38,9 +39,9 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(buildCmd)
-	rootCmd.AddCommand(watchCmd)    // New
-	rootCmd.AddCommand(updateCmd)   // New
-	rootCmd.AddCommand(cleanCmd)    // New
+	rootCmd.AddCommand(watchCmd)    
+	rootCmd.AddCommand(updateCmd) 
+	rootCmd.AddCommand(cleanCmd) 
 	
 	// Add global flags
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose logging")
