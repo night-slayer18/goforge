@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.5' # From go.mod
+          go-version: '1.22.x'
           cache: true
 
       - name: Run tests
@@ -46,7 +46,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.5'
+          go-version: '1.22.x'
           cache: true
 
       - name: Get version from tag
