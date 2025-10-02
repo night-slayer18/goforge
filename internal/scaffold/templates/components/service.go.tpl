@@ -1,7 +1,7 @@
 package service
 
 import (
-	"{{.ModulePath}}/internal/ports"
+	// "{{.ModulePath}}/internal/ports" // TODO: Uncomment when you add repository dependencies.
 )
 
 // {{.NameTitle}}Service provides application logic for the {{.Name}} resource.

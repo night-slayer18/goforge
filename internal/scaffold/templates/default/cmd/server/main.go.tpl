@@ -7,9 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 
-	"{{.ModuleName}}/internal/adapters/database"
+	// "{{.ModuleName}}/internal/adapters/database" // TODO: Uncomment when database is wired up
 	"{{.ModuleName}}/internal/adapters/http/handler"
-	"{{.ModuleName}}/internal/adapters/postgres"
+	// "{{.ModuleName}}/internal/adapters/postgres" // TODO: Uncomment when database is wired up
 	"{{.ModuleName}}/internal/app/service"
 	"{{.ModuleName}}/internal/ports"
 )

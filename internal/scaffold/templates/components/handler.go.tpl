@@ -4,18 +4,18 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"{{.ModulePath}}/internal/app/service"
+	// "{{.ModulePath}}/internal/app/service" // TODO: Uncomment when service is created and wired up.
 )
 
 // {{.NameTitle}}Handler handles HTTP requests related to the {{.Name}} resource.
 type {{.NameTitle}}Handler struct {
-	service *service.{{.NameTitle}}Service
+	// service *service.{{.NameTitle}}Service // TODO: Add service dependency.
 }
 
 // New{{.NameTitle}}Handler creates a new {{.NameTitle}}Handler.
-func New{{.NameTitle}}Handler(s *service.{{.NameTitle}}Service) *{{.NameTitle}}Handler {
+func New{{.NameTitle}}Handler(/* s *service.{{.NameTitle}}Service */) *{{.NameTitle}}Handler { // TODO: Inject service.
 	return &{{.NameTitle}}Handler{
-		service: s,
+		// service: s,
 	}
 }
 

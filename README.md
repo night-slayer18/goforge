@@ -1,6 +1,9 @@
 # GoForge CLI
 
 <p align="center">
+  <a href="https://github.com/night-slayer18/goforge/actions/workflows/ci.yml">
+    <img src="https://github.com/night-slayer18/goforge/actions/workflows/ci.yml/badge.svg" alt="Go CI">
+  </a>
   <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=for-the-badge&logo=go" alt="Go Version">
   <img src="https://img.shields.io/badge/Architecture-Clean-green?style=for-the-badge" alt="Clean Architecture">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License">
@@ -8,14 +11,25 @@
 
 A powerful, NestJS-inspired CLI tool for scaffolding and managing Go applications with Clean Architecture principles. GoForge helps you focus on business logic instead of boilerplate setup and configuration.
 
+## Table of Contents
+
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [📁 Project Structure](#-project-structure)
+- [🔧 Commands Reference](#-commands-reference)
+- [📝 Configuration](#-configuration)
+- [🏛️ Clean Architecture](#️-clean-architecture)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+
 ## ✨ Features
 
 - 🏗️ **Clean Architecture** - Scaffolds projects following Clean Architecture principles
 - 🚀 **Quick Setup** - Get a production-ready Go API in seconds
 - 🔧 **Code Generation** - Generate handlers, services, repositories, models, and more
 - 📦 **Dependency Management** - Simple dependency addition and updates
-- 🔄 **Hot Reload** - Built-in file watching for development
-- 🛠️ **Build System** - Integrated build and asset management
+- 🔄 **Hot Reload** - Built-in file watching for development, configurable via `goforge.yml`
+- 🛠️ **Build System** - Integrated, cross-platform build and asset management
 - 📋 **Script Runner** - Custom script execution like npm scripts
 - 🎯 **Type Safety** - Generate type-safe interfaces and implementations
 
@@ -41,7 +55,7 @@ goforge new my-api
 cd my-api
 
 # Start development server with hot reload
-goforge run dev
+goforge watch
 ```
 
 Your API server will start at `http://localhost:8080` with a basic health check endpoint.
@@ -91,8 +105,8 @@ goforge new user-service --module-path github.com/myorg/user-service
 # Skip Git initialization
 goforge new simple-app --skip-git
 
-# With verbose output
-goforge new my-project --verbose
+# Use interactive mode
+goforge new -i
 ```
 
 #### Clean Project
@@ -102,69 +116,30 @@ goforge clean
 
 # Clean everything including Go module cache
 goforge clean --all
-
-# Dry run (see what would be removed)
-goforge clean --dry-run
 ```
 
 ### Code Generation
 
 Generate various application components with the `generate` command (alias: `g`):
 
-#### HTTP Handlers
 ```bash
+# Generate a handler
 goforge generate handler user
-goforge g handler auth
-goforge g h product          # Short alias
-```
-*Creates: `internal/adapters/http/handler/user_handler.go`*
 
-#### Business Services
-```bash
-goforge generate service user
-goforge g service email
-goforge g s notification     # Short alias
-```
-*Creates: `internal/app/service/user_service.go`*
+# Generate a service (short alias)
+goforge g service auth
 
-#### Data Repositories
-```bash
-goforge generate repository user
-goforge g repository product
-goforge g repo order         # Alias
-goforge g r customer         # Short alias
+# Generate a repository (short alias)
+goforge g r product
 ```
-*Creates: `internal/adapters/postgres/user_repo.go`*
+*(See `goforge generate --help` for all available components)*
 
-#### Domain Models
-```bash
-goforge generate model user
-goforge g model product
-goforge g mod order          # Short alias
-```
-*Creates: `internal/domain/user.go`*
-
-#### HTTP Middleware
-```bash
-goforge generate middleware auth
-goforge g middleware cors
-goforge g m logging          # Short alias
-```
-*Creates: `internal/adapters/http/middleware/auth.go`*
-
-#### Port Interfaces
-```bash
-goforge generate port user
-goforge g port notification
-goforge g p email            # Short alias
-```
-*Creates: `internal/ports/user_port.go`*
 
 ### Development Workflow
 
 #### Run Scripts
 ```bash
-# Start development server
+# Start development server (defined in goforge.yml)
 goforge run dev
 
 # Build the project
@@ -172,47 +147,37 @@ goforge run build
 
 # Run tests
 goforge run test
-
-# Custom scripts (defined in goforge.yml)
-goforge run lint
-goforge run db:migrate
 ```
 
 #### File Watching
 ```bash
-# Watch for changes and auto-restart
+# Watch for changes and auto-restart the 'dev' script
 goforge watch
-
-# Watch specific script
-goforge watch dev
-goforge watch test
 ```
 
 #### Building
 ```bash
-# Build production binary
+# Build production binary and copy assets
 goforge build
-
-# Binary will be created in dist/ directory
 ```
 
 ### Dependency Management
 
 #### Add Dependencies
 ```bash
-# Add latest version
+# Add latest version and tidy modules
 goforge add github.com/gin-gonic/gin
 
 # Add specific version
-goforge add github.com/stretchr/testify@v1.8.0
+goforge add github.com/stretchr/testify@v1.8.4
 ```
 
 #### Update Dependencies
 ```bash
-# Update all dependencies
+# Update all dependencies defined in goforge.yml
 goforge update
 
-# Update specific dependency
+# Update a specific dependency to latest
 goforge update github.com/gin-gonic/gin
 ```
 
@@ -223,33 +188,37 @@ goforge update github.com/gin-gonic/gin
 The `goforge.yml` file is the heart of your project configuration:
 
 ```yaml
-# Project metadata
+# GoForge project configuration
 project_name: "my-api"
 module_path: "github.com/myorg/my-api"
 go_version: "1.24.5"
 
-# Dependencies
+# Dependencies with version constraints
 dependencies:
   github.com/gin-gonic/gin: "^1.10.0"
   github.com/spf13/viper: "^1.19.0"
-  github.com/jackc/pgx/v5: "^5.6.0"
 
-# Custom scripts
+# Custom scripts for project automation
 scripts:
   dev: "go run ./cmd/server"
   build: "goforge build"
   test: "go test ./..."
   lint: "golangci-lint run"
-  fmt: "go fmt ./..."
-  db:migrate: "migrate -path ./migrations -database postgres://localhost/mydb up"
 
 # Build configuration
 build:
   output_dir: "dist"
-  binary_name: "my-api"
   assets:
     - "config/default.yml"
-    - "web/static"
+
+# Development server configuration
+dev:
+  watch:
+    - "**/*.go"
+    - "config/**/*.yml"
+  ignore:
+    - "dist/**"
+    - "**/*_test.go"
 ```
 
 ### Application Configuration
@@ -268,165 +237,22 @@ database:
   password: "password"
   dbname: "myapp_db"
   sslmode: "disable"
-
-logging:
-  level: "debug"
 ```
 
 ## 🏛️ Clean Architecture
 
-GoForge follows Clean Architecture principles with clear separation of concerns:
+GoForge follows Clean Architecture principles with clear separation of concerns. The dependency rule is strictly enforced: source code dependencies can only point inwards.
+
+<p align="center">
+  <img src="https://blog.cleancoder.com/uncle-bob/images/2012-08-13-the-clean-architecture/CleanArchitecture.jpg" alt="Clean Architecture Diagram" width="500">
+</p>
 
 ### Layers
 
-1. **Domain** (`internal/domain/`) - Core business entities
-2. **Ports** (`internal/ports/`) - Interface definitions
-3. **Application** (`internal/app/service/`) - Business logic
-4. **Adapters** (`internal/adapters/`) - External interfaces
-
-### Dependency Flow
-
-```
-HTTP Handler → Service → Repository Interface ← Repository Implementation
-      ↓            ↓              ↑                        ↓
-   Adapters → Application ← Ports Domain ←          Adapters
-```
-
-### Example Component Flow
-
-```bash
-# 1. Generate domain model
-goforge g model user
-
-# 2. Generate port interface
-goforge g port user
-
-# 3. Generate repository implementation
-goforge g repository user
-
-# 4. Generate business service
-goforge g service user
-
-# 5. Generate HTTP handler
-goforge g handler user
-```
-
-## 🚀 Complete Example
-
-Here's a complete example of building an e-commerce API:
-
-```bash
-# 1. Create the project
-goforge new ecommerce-api -m github.com/mycompany/ecommerce-api
-cd ecommerce-api
-
-# 2. Generate domain models
-goforge g model product
-goforge g model user
-goforge g model order
-
-# 3. Generate port interfaces
-goforge g port product
-goforge g port user
-goforge g port order
-
-# 4. Generate repositories
-goforge g repository product
-goforge g repository user
-goforge g repository order
-
-# 5. Generate services
-goforge g service product
-goforge g service user
-goforge g service order
-
-# 6. Generate handlers
-goforge g handler product
-goforge g handler user
-goforge g handler order
-
-# 7. Generate middleware
-goforge g middleware auth
-goforge g middleware cors
-
-# 8. Add dependencies
-goforge add github.com/golang-jwt/jwt/v4
-goforge add github.com/go-playground/validator/v10
-
-# 9. Start development
-goforge watch
-```
-
-## 🛠️ Advanced Usage
-
-### Custom Scripts
-
-Add custom scripts to your `goforge.yml`:
-
-```yaml
-scripts:
-  # Development
-  dev: "go run ./cmd/server"
-  dev:debug: "dlv debug ./cmd/server"
-  
-  # Testing
-  test: "go test ./..."
-  test:coverage: "go test -coverprofile=coverage.out ./..."
-  test:race: "go test -race ./..."
-  
-  # Database
-  db:up: "migrate -path ./migrations -database $DATABASE_URL up"
-  db:down: "migrate -path ./migrations -database $DATABASE_URL down"
-  db:seed: "go run ./scripts/seed.go"
-  
-  # Deployment
-  docker:build: "docker build -t myapp ."
-  deploy:staging: "./scripts/deploy.sh staging"
-  deploy:prod: "./scripts/deploy.sh production"
-```
-
-### Multiple Environments
-
-Organize configuration by environment:
-
-```
-config/
-├── default.yml      # Base configuration
-├── development.yml  # Development overrides
-├── staging.yml      # Staging overrides
-└── production.yml   # Production overrides
-```
-
-### Database Integration
-
-GoForge generates PostgreSQL-ready repositories. To integrate:
-
-1. **Add database dependencies:**
-```bash
-goforge add github.com/jackc/pgx/v5
-goforge add github.com/golang-migrate/migrate/v4
-```
-
-2. **Update your main.go:**
-```go
-// Uncomment database connection in cmd/server/main.go
-dbPool := database.Connect()
-defer dbPool.Close()
-
-userRepo := postgres.NewPostgresUserRepository(dbPool)
-```
-
-3. **Create migrations:**
-```sql
--- migrations/001_create_users_table.up.sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-```
+1.  **Domain** (`internal/domain/`) - Core business entities and rules.
+2.  **Ports** (`internal/ports/`) - Interfaces defining contracts for services and repositories.
+3.  **Application** (`internal/app/service/`) - Business logic and use cases, orchestrating domain objects.
+4.  **Adapters** (`internal/adapters/`) - Connectors to external systems like databases, web frameworks, etc.
 
 ## 🤝 Contributing
 
@@ -442,26 +268,14 @@ cd goforge
 # Install dependencies
 go mod tidy
 
-# Build the CLI
-go build -o bin/goforge .
+# Build the CLI with a version number
+VERSION="1.2.0"
+go build -ldflags="-X 'github.com/night-slayer18/goforge/cmd.version=$VERSION'" -o goforge .
 
 # Test with local binary
-./bin/goforge new test-project
+./goforge --version
 ```
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Inspired by [NestJS CLI](https://nestjs.com/) for Node.js
-- Built with [Cobra](https://github.com/spf13/cobra) for CLI framework
-- Uses [Gin](https://github.com/gin-gonic/gin) for HTTP routing
-- Follows [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) principles
-
----
-
-<p align="center">
-  Made with ❤️ by <a href="https://github.com/night-slayer18">night-slayer18</a>
-</p>

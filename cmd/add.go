@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/night-slayer18/goforge/internal/logger"
 	"github.com/night-slayer18/goforge/internal/project"
 	"github.com/night-slayer18/goforge/internal/runner"
 	"github.com/spf13/cobra"
@@ -32,11 +33,13 @@ var addCmd = &cobra.Command{
 		}
 
 		// Extract module base path and version for goforge.yml.
-		parts := strings.Split(modulePath, "@")
-		moduleName := parts[0]
-		version := "latest"
-		if len(parts) > 1 {
-			version = parts[1]
+		var moduleName, version string
+		if i := strings.LastIndex(modulePath, "@"); i != -1 {
+			moduleName = modulePath[:i]
+			version = modulePath[i+1:]
+		} else {
+			moduleName = modulePath
+			version = "latest"
 		}
 
 		if cfg.Dependencies == nil {
@@ -48,6 +51,11 @@ var addCmd = &cobra.Command{
 		err = project.SaveConfig(projectRoot, cfg)
 		if err!= nil {
 			return fmt.Errorf("failed to update goforge.yml: %w", err)
+		}
+
+		// Tidy modules to ensure consistency
+		if err := runner.TidyGoModule(projectRoot); err != nil {
+			logger.Warn("Failed to tidy go modules: %v", err)
 		}
 
 		fmt.Printf("✅ Successfully added '%s' and updated goforge.yml.\n", modulePath)

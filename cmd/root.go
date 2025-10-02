@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version
-var version = "1.1.2"
+// version is set at build time
+var version = "dev"
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "goforge",

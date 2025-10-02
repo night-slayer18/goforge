@@ -1,0 +1,20 @@
+# Binaries
+goforge
+goforge.exe
+
+# Test projects
+my-test-app/
+my-new-test-app/
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Go build cache
+*.test
+*.out

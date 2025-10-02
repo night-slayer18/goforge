@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -58,7 +59,7 @@ Examples:
 			return fmt.Errorf("script '%s' not found in goforge.yml\n\nAvailable scripts:\n%s", 
 				scriptName, formatAvailableScripts(cfg.Scripts))
 		}
-
+		
 		logger.Info("👀 Starting GoForge watch mode")
 		logger.Info("📝 Script: %s → %s", scriptName, script)
 		logger.Info("📁 Watching: %s", projectRoot)
@@ -66,7 +67,7 @@ Examples:
 		logger.Info("")
 
 		// Create the advanced watcher
-		watcher := NewAdvancedWatcher(projectRoot, script, verbose)
+		watcher := NewAdvancedWatcher(projectRoot, script, verbose, cfg)
 		defer watcher.Close()
 
 		// Set up graceful shutdown
@@ -109,7 +110,7 @@ type AdvancedWatcher struct {
 }
 
 // NewAdvancedWatcher creates a new advanced watcher
-func NewAdvancedWatcher(projectRoot, script string, verbose bool) *AdvancedWatcher {
+func NewAdvancedWatcher(projectRoot, script string, verbose bool, cfg *project.Config) *AdvancedWatcher {
 	watcher := &AdvancedWatcher{
 		projectRoot: projectRoot,
 		script:      script,
@@ -117,14 +118,14 @@ func NewAdvancedWatcher(projectRoot, script string, verbose bool) *AdvancedWatch
 		debouncer:   NewDebouncer(1500 * time.Millisecond), // Smart debouncing
 	}
 	
-	watcher.loadProjectConfig()
+	watcher.loadProjectConfig(cfg)
 	
 	return watcher
 }
 
 // loadProjectConfig loads project-specific configuration
-func (aw *AdvancedWatcher) loadProjectConfig() {
-	// Try to load viper config to detect port
+func (aw *AdvancedWatcher) loadProjectConfig(cfg *project.Config) {
+	// Try to load viper config to detect port from config/default.yml
 	viper.SetConfigName("default")
 	viper.SetConfigType("yml")
 	viper.AddConfigPath(filepath.Join(aw.projectRoot, "config"))
@@ -137,22 +138,35 @@ func (aw *AdvancedWatcher) loadProjectConfig() {
 		aw.projectPort = 8080 // Default
 	}
 	
-	// Set up default watch patterns
-	aw.watchPatterns = []string{
-		"**/*.go",
-		"**/*.yml",
-		"**/*.yaml",
-		"**/*.json",
+	// Set up watch and ignore patterns
+	// Use values from goforge.yml if available, otherwise use defaults.
+	if cfg.Dev != nil && len(cfg.Dev.Watch) > 0 {
+		aw.watchPatterns = cfg.Dev.Watch
+		logger.Debug("Loaded %d watch patterns from goforge.yml", len(cfg.Dev.Watch))
+	} else {
+		aw.watchPatterns = []string{
+			"**/*.go",
+			"**/*.yml",
+			"**/*.yaml",
+			"**/*.json",
+		}
+		logger.Debug("Using default watch patterns")
 	}
 	
-	aw.ignorePatterns = []string{
-		"**/*_test.go",
-		"dist/**",
-		"vendor/**",
-		".git/**",
-		"node_modules/**",
-		"**/*.tmp",
-		"**/*.log",
+	if cfg.Dev != nil && len(cfg.Dev.Ignore) > 0 {
+		aw.ignorePatterns = cfg.Dev.Ignore
+		logger.Debug("Loaded %d ignore patterns from goforge.yml", len(cfg.Dev.Ignore))
+	} else {
+		aw.ignorePatterns = []string{
+			"**/*_test.go",
+			"dist/**",
+			"vendor/**",
+			".git/**",
+			"node_modules/**",
+			"**/*.tmp",
+			"**/*.log",
+		}
+		logger.Debug("Using default ignore patterns")
 	}
 	
 	logger.Debug("Detected project port: %d", aw.projectPort)
@@ -570,33 +584,84 @@ func (pm *PortManager) isPortAvailable(port int) bool {
 	return true
 }
 
-// attemptPortCleanup tries to free up a port
+// attemptPortCleanup tries to free up a port by calling a platform-specific implementation.
 func (pm *PortManager) attemptPortCleanup(port int) {
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		pm.attemptPortCleanupUnix(port)
+	case "windows":
+		pm.attemptPortCleanupWindows(port)
+	default:
+		logger.Debug("Port cleanup not supported on this OS: %s", runtime.GOOS)
+	}
+}
+
+// attemptPortCleanupUnix tries to free up a port on Unix-like systems.
+func (pm *PortManager) attemptPortCleanupUnix(port int) {
 	// Use lsof to find and kill processes using the port
 	cmd := exec.Command("lsof", "-ti", fmt.Sprintf(":%d", port))
 	output, err := cmd.Output()
 	if err != nil {
 		return
 	}
-	
+
 	pidStr := strings.TrimSpace(string(output))
 	if pidStr == "" {
 		return
 	}
-	
+
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		return
 	}
-	
+
 	logger.Debug("Killing process %d using port %d", pid, port)
 	if process, err := os.FindProcess(pid); err == nil {
 		process.Signal(syscall.SIGTERM)
-		
+
 		// Wait a moment, then force kill if needed
 		time.Sleep(1 * time.Second)
 		if !pm.isPortAvailable(port) {
 			process.Kill()
+		}
+	}
+}
+
+// attemptPortCleanupWindows tries to free up a port on Windows.
+func (pm *PortManager) attemptPortCleanupWindows(port int) {
+	portStr := fmt.Sprintf(":%d", port)
+	findPidCmd := fmt.Sprintf("netstat -aon | findstr %s", portStr)
+
+	out, err := exec.Command("cmd", "/C", findPidCmd).Output()
+	if err != nil {
+		logger.Debug("Could not find process for port %d: %v", port, err)
+		return
+	}
+
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 5 {
+			continue
+		}
+
+		if strings.Contains(fields[1], portStr) {
+			pidStr := fields[len(fields)-1]
+			pid, err := strconv.Atoi(pidStr)
+			if err != nil {
+				logger.Debug("Could not parse PID from netstat output: %s", pidStr)
+				continue
+			}
+
+			logger.Debug("Found process %d on port %d. Attempting to kill.", pid, port)
+
+			killCmd := exec.Command("taskkill", "/F", "/PID", pidStr)
+			if err := killCmd.Run(); err != nil {
+				logger.Warn("Failed to kill process %d: %v", pid, err)
+			} else {
+				logger.Debug("Successfully sent kill signal to process %d", pid)
+			}
+			return
 		}
 	}
 }

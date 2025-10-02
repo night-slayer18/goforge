@@ -16,11 +16,18 @@ type Config struct {
 	Dependencies map[string]string `yaml:"dependencies"`
 	Scripts      map[string]string `yaml:"scripts"`
 	Build        *BuildConfig      `yaml:"build"`
+	Dev          *DevConfig        `yaml:"dev"`
 }
 
 // BuildConfig defines the build-specific configuration.
 type BuildConfig struct {
 	Assets []string `yaml:"assets"`
+}
+
+// DevConfig defines the development-specific configuration for the watch command.
+type DevConfig struct {
+	Watch  []string `yaml:"watch"`
+	Ignore []string `yaml:"ignore"`
 }
 
 // LoadConfig finds and parses the goforge.yml file from the current directory
